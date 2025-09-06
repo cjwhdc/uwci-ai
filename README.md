@@ -1,194 +1,153 @@
-# Sermon AI Q&A System
+# UWCI Sermon AI
 
-A smart AI-powered system for analyzing sermon transcripts and answering detailed questions about their content. Built with Streamlit, ChromaDB, and OpenAI/Ollama integration.
+A smart AI system to ingest sermon transcripts and answer detailed questions about their content.
 
 ## Features
 
-- **Automatic sermon processing** from markdown files
-- **AI-powered Q&A** with semantic search across all sermons
-- **Pastor-specific queries** - ask what specific pastors said about topics
-- **Bible integration** with XML Bible translations (AMP & NLT)
-- **Intelligent chunking** for better context understanding
-- **Dual AI support** - OpenAI or local Ollama models
+- **Secure Login**: Production-ready authentication with rate limiting and user management
+- **Auto-Import**: Automatically process sermon files from the `data/sermons/` directory
+- **AI-Powered Search**: Vector-based semantic search using ChromaDB
+- **Conversational Interface**: Chat with your sermon library
+- **Multiple AI Models**: Support for both Grok AI and local Ollama models
+- **Pastor Filtering**: Focus on specific pastors' teachings
+- **Sermon Titles**: References sermons by title instead of dates
 
-## Quick Start
+## Security Notice
 
-### 1. Installation
+This application includes production-ready security features including user authentication, encrypted password storage, and rate limiting. Never commit sensitive configuration files to version control.
 
-```bash
-# Clone or download the project
-git clone <your-repo-url>
-cd sermon-ai
+## Quick Setup (After GitHub Clone)
 
-# Create directory structure
-mkdir -p data/sermons data/bible
+1. **Run the automated setup:**
+   ```bash
+   python setup.py
+   ```
 
-# Install dependencies
-cd app
-pip install -r requirements.txt
-```
+2. **Edit configuration:**
+   - Add your Grok API key to `app/config/config.py` OR
+   - Set environment variables in `.env` file
 
-### 2. Add Your Content
+3. **Start the application:**
+   ```bash
+   streamlit run main.py
+   ```
 
-Place your sermon files in the data directory:
-```bash
-# Add sermon transcripts (.md format)
-cp your-sermons/*.md data/sermons/
+## Manual Installation
 
-# Add Bible translations (optional)
-cp EnglishAmplifiedBible.xml data/bible/
-cp EnglishNLTBible.xml data/bible/
-```
+1. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-### 3. Run the Application
+2. **Create directories:**
+   ```bash
+   mkdir -p app/data data/sermons logs
+   ```
 
-```bash
-cd app
-streamlit run sermon_qa_app.py
-```
+3. **Configure API keys:**
+   ```bash
+   cp app/config/config.template.py app/config/config.py
+   # Edit app/config/config.py with your actual Grok API key
+   ```
 
-The app will automatically:
-- Process all sermon files on startup
-- Create a vector database for semantic search
-- Load Bible translations if present
+4. **OR use environment variables:**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your actual API keys
+   ```
 
-## Usage
+5. **Add sermon files:**
+   Place your sermon transcript files (`.md` format) in `data/sermons/`
 
-### Adding New Sermons
-1. Drop `.md` files into `data/sermons/` folder
-2. Go to "Sermon Library" tab
-3. Click "Scan for New Sermons"
+6. **Start application:**
+   ```bash
+   streamlit run main.py
+   ```
 
-### Asking Questions
-1. Go to "Ask Questions" tab
-2. Optional: Filter by specific pastor
-3. Ask detailed questions like:
-   - "What did Pastor John say about faith?"
-   - "What are the key themes about forgiveness?"
-   - "Compare different pastors' views on deliverance"
+## First-Time Login
 
-### Bible Integration
-1. Go to "Bible Integration" tab
-2. Look up specific verses
-3. Search for words/phrases across translations
-
-## File Format Requirements
-
-### Sermon Files (.md format)
-```markdown
-# Sermon Title
-Pastor Name
-Date (MM/DD/YYYY)
-
-Sermon content goes here...
-```
-
-The system extracts:
-- **Pastor name** from the second line
-- **Date** from content (various formats supported)
-- **Title** from filename or first line
-
-### Bible Files (XML format)
-Place XML Bible files in `data/bible/`:
-- `EnglishAmplifiedBible.xml`
-- `EnglishNLTBible.xml`
-
-## AI Configuration
-
-The system supports two AI options:
-
-### OpenAI (Default)
-- Hardcoded API key for immediate use
-- Uses `gpt-4o-mini` model
-- Best results for complex theological questions
-
-### Local Ollama
-1. Install Ollama: `brew install ollama`
-2. Start service: `ollama serve`
-3. Download model: `ollama pull llama3.2`
-4. Switch to local AI in Settings tab
+1. Check `app/data/initial_admin_password.txt` for admin credentials
+2. Login and immediately change the admin password
+3. Create additional user accounts via Settings > User Management
+4. Delete the initial password file
 
 ## Project Structure
 
 ```
 sermon-ai/
 ├── app/
-│   ├── sermon_qa_app.py      # Main application
-│   └── requirements.txt      # Dependencies
+│   ├── __init__.py
+│   ├── auth.py               # Production authentication system
+│   ├── sermon_processor.py   # Sermon processing and metadata extraction
+│   ├── ai_engine.py          # AI processing engine
+│   ├── ui/
+│   │   ├── __init__.py
+│   │   ├── login.py          # Login interface
+│   │   ├── chat.py           # Chat interface
+│   │   ├── library.py        # Library management
+│   │   └── settings.py       # Settings and user management
+│   └── config/
+│       ├── __init__.py
+│       ├── config.template.py # Template (safe for GitHub)
+│       └── config.py         # Your actual config (excluded from git)
 ├── data/
-│   ├── sermons/             # Sermon .md files
-│   └── bible/               # Bible XML files
-├── sermon_db/               # Vector database (auto-created)
+│   └── sermons/              # Sermon files (excluded from git)
+├── app/data/                 # User data storage (excluded from git)
+├── sermon_db/                # ChromaDB storage (excluded from git)
+├── main.py                   # Main application entry point
+├── setup.py                  # Automated setup script
+├── .env.example              # Environment variables template
+├── .gitignore                # Protects sensitive files
+├── requirements.txt
 └── README.md
 ```
 
-## Dependencies
+## Environment Variables
 
-- **Streamlit** - Web interface
-- **ChromaDB** - Vector database for semantic search
-- **OpenAI** - AI text generation
-- **sentence-transformers** - Text embeddings
-- **pandas** - Data management
+Set these in your `.env` file or system environment:
 
-## Advanced Features
+```bash
+GROK_API_KEY=your-actual-grok-api-key
+DATABASE_PATH=./sermon_db
+USER_DATA_PATH=app/data/users.json
+SESSION_TIMEOUT=3600
+```
 
-### Semantic Search
-The system uses advanced embeddings to find conceptually related content, not just keyword matches.
+## Sermon File Format
 
-### Pastor Attribution
-All responses include proper attribution to specific pastors with dates and sermon references.
+Sermon files should be in Markdown format:
 
-### Intelligent Chunking
-Long sermons are split into overlapping chunks to maintain context while enabling precise search.
+```markdown
+# Sermon Title
+Pastor Name
+Date or "Watch"
+Additional date if "Watch" was used
 
-### Bible Cross-Referencing
-Automatically detects Bible references in sermons and links them to actual verses.
+Sermon content goes here...
+```
 
-## Troubleshooting
+## Security Features
 
-### Common Issues
+- **Secure authentication** with PBKDF2 password hashing
+- **Rate limiting** with account lockout protection
+- **Role-based access control** (user/administrator)
+- **Session management** with proper cleanup
+- **User activity tracking** and audit logs
+- **Environment variable support** for secrets
 
-**"Sermon directory not found"**
-- Create the `data/sermons` directory
-- Ensure you're running from the correct location
+## Production Deployment
 
-**"No AI model available"**
-- Check OpenAI API key is working
-- For Ollama: run `ollama list` to see available models
-
-**"Error processing sermons"**
-- Check sermon file format (second line should be pastor name)
-- Ensure files are UTF-8 encoded
-
-### Database Management
-- **Clear database**: Use "Clear Database" button in Sermon Library
-- **Reset everything**: Delete `sermon_db/` folder and restart
-
-## Configuration
-
-### Settings Tab Options
-- **AI Model Selection** - Switch between OpenAI and Ollama
-- **Chunk Size** - Adjust for more/less context (500-2000 words)
-- **Search Results** - Number of excerpts returned (3-20)
-
-### File Paths
-All paths are relative to the app directory:
-- Sermons: `data/sermons/`
-- Bible files: `data/bible/`
-- Database: `sermon_db/`
-
-## Security Note
-
-The OpenAI API key is currently hardcoded in the source. For production use:
-- Use environment variables
-- Add source files to `.gitignore`
-- Regenerate API keys if code is shared
+See `PRODUCTION_SETUP.md` for detailed production deployment instructions including:
+- Security hardening
+- Backup strategies
+- Monitoring setup
+- Docker deployment
+- Cloud deployment options
 
 ## Support
 
-For issues or questions:
-1. Check the Settings tab for system status
-2. Review file format requirements
-3. Verify directory structure matches documentation
+For production support and advanced configuration, refer to the production setup guide.
 
-The system provides detailed error messages and status information to help diagnose issues.
+## License
+
+This project is for internal use by UWCI.

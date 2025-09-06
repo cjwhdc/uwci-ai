@@ -1,44 +1,71 @@
-# API Keys and Configuration
-app/config/config.py
-
 # Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
 .Python
 env/
 venv/
+ENV/
+.env
 .venv/
-pip-log.txt
-pip-delete-this-directory.txt
 
-# Database
+# Streamlit
+.streamlit/
+
+# Sensitive data files (but allow config.py for deployment)
+app/data/
+*.json
+*.db
+
+# API keys and secrets (local development)
+.env
+.env.local
+.env.production
+secrets.json
+initial_admin_password.txt
+
+# Only ignore config.py if it contains sensitive data
+# Comment out the next line if you want to commit a environment-variable-based config.py
+# app/config/config.py
+
+# Database files
 sermon_db/
+sermon_db_backup/
 *.db
 *.sqlite
+*.sqlite3
 
 # Logs
 logs/
 *.log
 
-# Environment variables
-.env
-.env.local
+# Backup files
+backup/
+*.backup
+*.bak
 
-# IDE
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
-# OS
-.DS_Store
-Thumbs.db
+# Temporary files
+temp/
+tmp/
+*.tmp
 
-# Personal data
+# User uploaded content
 data/sermons/*.md
-data/bible/*.xml
-
-# Streamlit
-.streamlit/
+uploads/
