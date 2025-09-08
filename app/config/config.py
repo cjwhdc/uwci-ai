@@ -1,4 +1,4 @@
-# Configuration for Sermon AI
+# Configuration for Sermon AI with Enhanced Features
 # This file loads settings from environment variables (.env file)
 # For Streamlit Cloud, set environment variables in the app dashboard
 
@@ -35,6 +35,25 @@ except Exception:
 
 if not GROK_API_KEY:
     print("Warning: GROK_API_KEY not found. Set it in .env file or environment variables.")
+
+# Enhanced features configuration
+ENABLE_ENHANCED_LOGGING = os.getenv('ENABLE_ENHANCED_LOGGING', 'true').lower() == 'true'
+ENABLE_RATE_LIMITING = os.getenv('ENABLE_RATE_LIMITING', 'true').lower() == 'true'
+ENABLE_SESSION_MONITORING = os.getenv('ENABLE_SESSION_MONITORING', 'true').lower() == 'true'
+
+# Rate limiting settings
+GLOBAL_REQUESTS_PER_MINUTE = int(os.getenv('GLOBAL_REQUESTS_PER_MINUTE', '20'))
+USER_REQUESTS_PER_MINUTE = int(os.getenv('USER_REQUESTS_PER_MINUTE', '5'))
+GLOBAL_REQUESTS_PER_HOUR = int(os.getenv('GLOBAL_REQUESTS_PER_HOUR', '1000'))
+USER_REQUESTS_PER_HOUR = int(os.getenv('USER_REQUESTS_PER_HOUR', '50'))
+
+# Session management settings
+MAX_SESSIONS_PER_USER = int(os.getenv('MAX_SESSIONS_PER_USER', '5'))
+SESSION_CLEANUP_INTERVAL = int(os.getenv('SESSION_CLEANUP_INTERVAL', '3600'))  # 1 hour
+
+# Logging settings
+LOG_RETENTION_DAYS = int(os.getenv('LOG_RETENTION_DAYS', '30'))
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 
 # Dropbox sync configuration
 USE_DROPBOX_SYNC = os.getenv('USE_DROPBOX_SYNC', 'false').lower() == 'true'
@@ -166,23 +185,26 @@ DEFAULT_CHUNK_SIZE = int(os.getenv('DEFAULT_CHUNK_SIZE', '1000'))
 DEFAULT_CHUNK_OVERLAP = int(os.getenv('DEFAULT_CHUNK_OVERLAP', '200'))
 
 # Search settings
-MAX_SEARCH_RESULTS = int(os.getenv('MAX_SEARCH_RESULTS', '5'))
+MAX_SEARCH_RESULTS = int(os.getenv('MAX_SEARCH_RESULTS', '10'))
 
 # Database configuration
 DATABASE_PATH = os.getenv('DATABASE_PATH', './sermon_db')
 USER_DATA_PATH = os.getenv('USER_DATA_PATH', 'app/data/users.json')
 
 # Security settings
-SESSION_TIMEOUT = int(os.getenv('SESSION_TIMEOUT', '3600'))  # 1 hour
+SESSION_TIMEOUT = int(os.getenv('SESSION_TIMEOUT', '86400'))  # 24 hours
 MAX_LOGIN_ATTEMPTS = int(os.getenv('MAX_LOGIN_ATTEMPTS', '5'))
 LOCKOUT_DURATION = int(os.getenv('LOCKOUT_DURATION', '900'))  # 15 minutes
 
-# Logging settings
-LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
-LOG_DIR = os.getenv('LOG_DIR', 'logs')
+# Performance settings
+QUERY_CACHE_TIMEOUT = int(os.getenv('QUERY_CACHE_TIMEOUT', '300'))  # 5 minutes
+MAX_CACHE_SIZE = int(os.getenv('MAX_CACHE_SIZE', '100'))
 
 # Debug print for troubleshooting
 if __name__ == "__main__":
     print(f"GROK_API_KEY loaded: {bool(GROK_API_KEY)}")
     print(f"USE_DROPBOX_SYNC: {USE_DROPBOX_SYNC}")
     print(f"DROPBOX_ACCESS_TOKEN loaded: {bool(DROPBOX_ACCESS_TOKEN)}")
+    print(f"Enhanced logging: {ENABLE_ENHANCED_LOGGING}")
+    print(f"Rate limiting: {ENABLE_RATE_LIMITING}")
+    print(f"Session monitoring: {ENABLE_SESSION_MONITORING}")

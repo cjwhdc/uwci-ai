@@ -203,12 +203,6 @@ def show_library_tab():
         3. **Files are chunked and indexed** for AI analysis and search
         4. **Already processed files are skipped** to avoid duplicates
         5. **Use "Clear Database"** if you need to start fresh (requires confirmation)
-        
-        **Benefits of manual processing:**
-        - Control over when processing happens
-        - No unexpected processing during startup
-        - Better visibility into what's being processed
-        - Faster application startup time
         """)
     else:
         st.subheader("Sermon Library Information")

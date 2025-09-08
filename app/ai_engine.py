@@ -2,6 +2,7 @@ import streamlit as st
 import time
 from pathlib import Path
 from typing import List, Dict, Any
+import hashlib
 
 # Fix for SQLite version issue on Streamlit Cloud (optional)
 try:
@@ -18,21 +19,28 @@ import requests
 from openai import OpenAI
 
 from .sermon_processor import SermonProcessor
+from .utils.error_handler import handle_errors, ErrorHandler, AIModelError, DatabaseError
+from .utils.logger import logger, log_ai_operation_decorator, log_db_operation_decorator
 
 class AIEngine:
-    """Main AI processing engine using ChromaDB and OpenAI/Local LLM"""
+    """Main AI processing engine using ChromaDB and OpenAI/Local LLM with enhanced error handling"""
     
     def __init__(self):
         self.client = None
         self.collection = None
         self.embedder = None
+        self.error_handler = ErrorHandler()
+        
+        # Query cache for performance
+        self._query_cache = {}
+        self._cache_timeout = 300  # 5 minutes
         
         # Try to sync database from cloud first
         self.sync_database_from_cloud()
         
         self.setup_vector_db()
-        # Auto-import removed - sermons now processed manually via Library tab
     
+    @handle_errors(context="cloud_sync", user_message="Cloud sync temporarily unavailable")
     def sync_database_from_cloud(self):
         """Sync database from Dropbox if configured"""
         try:
@@ -40,24 +48,33 @@ class AIEngine:
             if USE_DROPBOX_SYNC:
                 sync = DropboxDatabaseSync()
                 if sync.sync_from_dropbox():
+                    logger.log_app_event("dropbox_sync_success", {"direction": "download"})
                     return True
         except (ImportError, AttributeError):
             # Dropbox sync not configured, continue with local database
             pass
         except Exception as e:
+            logger.log_app_event("dropbox_sync_failed", {"direction": "download", "error": str(e)}, level="warning")
             st.warning(f"Dropbox sync failed, using local database: {e}")
         return False
     
+    @handle_errors(context="cloud_backup", user_message="Cloud backup temporarily unavailable")
     def sync_database_to_cloud(self):
         """Sync database to Dropbox if configured"""
         try:
             from app.config.config import USE_DROPBOX_SYNC, DropboxDatabaseSync
             if USE_DROPBOX_SYNC:
                 sync = DropboxDatabaseSync()
-                return sync.sync_to_dropbox()
+                success = sync.sync_to_dropbox()
+                if success:
+                    logger.log_app_event("dropbox_sync_success", {"direction": "upload"})
+                else:
+                    logger.log_app_event("dropbox_sync_failed", {"direction": "upload"}, level="warning")
+                return success
         except (ImportError, AttributeError):
             return False
         except Exception as e:
+            logger.log_app_event("dropbox_sync_failed", {"direction": "upload", "error": str(e)}, level="error")
             st.error(f"Dropbox sync failed: {e}")
             return False
     
@@ -71,9 +88,11 @@ class AIEngine:
         except (ImportError, AttributeError):
             pass
         except Exception as e:
+            logger.log_app_event("backup_info_failed", {"error": str(e)}, level="error")
             st.error(f"Error getting backup info: {e}")
         return None
     
+    @handle_errors(context="vector_db_setup", user_message="Database initialization failed")
     def setup_vector_db(self):
         """Initialize ChromaDB for vector storage"""
         try:
@@ -86,9 +105,16 @@ class AIEngine:
                 metadata={"description": "Sermon transcripts and chunks"}
             )
             
+            logger.log_db_operation("database_init", success=True, details={
+                "client_type": "persistent",
+                "collection_name": "sermons"
+            })
+            
         except Exception as e:
-            st.error(f"Error setting up vector database: {e}")
+            logger.log_db_operation("database_init", success=False, details={"error": str(e)})
+            raise DatabaseError(f"Error setting up vector database: {e}")
     
+    @log_db_operation_decorator("get_processed_files")
     def get_processed_files(self) -> set:
         """Get list of already processed sermon files"""
         try:
@@ -98,9 +124,11 @@ class AIEngine:
                 return processed
             return set()
         except Exception as e:
+            logger.log_db_operation("get_processed_files", success=False, details={"error": str(e)})
             st.error(f"Error getting processed files: {e}")
             return set()
     
+    @handle_errors(context="sermon_processing", user_message="Sermon processing temporarily unavailable")
     def process_new_sermons(self):
         """Process new sermons from data/sermons folder (Manual processing only)"""
         sermons_dir = Path("data/sermons")
@@ -128,6 +156,9 @@ class AIEngine:
             processor = SermonProcessor()
             progress_bar = st.progress(0)
             
+            processed_count = 0
+            failed_count = 0
+            
             for i, sermon_file in enumerate(new_files):
                 try:
                     st.write(f"Processing: {sermon_file.name}")
@@ -145,27 +176,46 @@ class AIEngine:
                     
                     if success:
                         st.success(f"Successfully processed: {sermon_file.name}")
-                        time.sleep(1)  # Reduced from 3 seconds
+                        processed_count += 1
+                        logger.log_app_event("sermon_processed", {
+                            "filename": sermon_file.name,
+                            "chunks": len(chunks),
+                            "word_count": metadata.get('word_count', 0)
+                        })
                     else:
                         st.error(f"Failed to process: {sermon_file.name}")
-                        time.sleep(1)
+                        failed_count += 1
+                    
+                    time.sleep(1)  # Brief pause for UI feedback
                     
                     # Update progress
                     progress_bar.progress((i + 1) / len(new_files))
                     
                 except Exception as e:
                     st.error(f"Error processing {sermon_file.name}: {e}")
+                    failed_count += 1
+                    logger.log_app_event("sermon_processing_failed", {
+                        "filename": sermon_file.name,
+                        "error": str(e)
+                    }, level="error")
             
-            st.success(f"Processing complete! Processed {len(new_files)} sermon(s).")
+            # Summary message
+            if processed_count > 0:
+                st.success(f"Processing complete! Successfully processed {processed_count} sermon(s).")
+            if failed_count > 0:
+                st.warning(f"{failed_count} sermon(s) failed to process. Check logs for details.")
         else:
             st.info(f"All {len(sermon_files)} sermon(s) already processed. Database is up to date.")
     
+    @handle_errors(context="text_embedding", user_message="Text processing temporarily unavailable")
     def embed_text(self, text: str) -> List[float]:
         """Generate embeddings for text using sentence transformers"""
         if not hasattr(self, 'embedder') or self.embedder is None:
             try:
                 self.embedder = SentenceTransformer('all-MiniLM-L6-v2')
+                logger.log_app_event("embedding_model_loaded", {"model": "all-MiniLM-L6-v2"})
             except Exception as e:
+                logger.log_app_event("embedding_model_failed", {"error": str(e)}, level="error")
                 st.error(f"Error loading embedding model: {e}")
                 return []
         
@@ -173,9 +223,11 @@ class AIEngine:
             embedding = self.embedder.encode(text).tolist()
             return embedding
         except Exception as e:
+            logger.log_app_event("embedding_failed", {"error": str(e)}, level="error")
             st.error(f"Error generating embedding: {e}")
             return []
     
+    @log_db_operation_decorator("add_sermon")
     def add_sermon(self, content: str, metadata: Dict[str, Any], chunks: List[str]):
         """Add sermon to vector database"""
         try:
@@ -206,19 +258,54 @@ class AIEngine:
                     ids=ids,
                     embeddings=embeddings
                 )
+                
+                logger.log_db_operation("add_sermon", success=True, details={
+                    "filename": metadata['filename'],
+                    "chunks_added": len(documents)
+                })
                 return True
             return False
             
         except Exception as e:
+            logger.log_db_operation("add_sermon", success=False, details={
+                "filename": metadata.get('filename', 'unknown'),
+                "error": str(e)
+            })
             st.error(f"Error adding sermon to database: {e}")
             return False
     
+    def _get_cache_key(self, query: str, pastor_filter: str = None) -> str:
+        """Generate cache key for query"""
+        cache_data = f"{query}|{pastor_filter or 'all'}"
+        return hashlib.md5(cache_data.encode()).hexdigest()
+    
+    @log_db_operation_decorator("search")
     def search_sermons(self, query: str, pastor_filter: str = None, n_results: int = None) -> List[Dict]:
-        """Search for relevant sermon content"""
+        """Search for relevant sermon content with caching"""
         try:
+            # Log user activity
+            logger.log_user_activity("sermon_search", {
+                'query_length': len(query),
+                'pastor_filter': pastor_filter,
+                'max_results': n_results
+            })
+            
+            # Check cache first
+            cache_key = self._get_cache_key(query, pastor_filter)
+            current_time = time.time()
+            
+            if cache_key in self._query_cache:
+                cached_result, timestamp = self._query_cache[cache_key]
+                if current_time - timestamp < self._cache_timeout:
+                    logger.log_db_operation("search_cached", success=True, details={
+                        'cache_hit': True,
+                        'query_hash': cache_key[:8]
+                    })
+                    return cached_result
+            
             # Use session state setting if available, otherwise default
             if n_results is None:
-                n_results = st.session_state.get('max_search_results', 5)
+                n_results = st.session_state.get('max_search_results', 10)
             
             query_embedding = self.embed_text(query)
             if not query_embedding:
@@ -244,15 +331,36 @@ class AIEngine:
                     }
                     search_results.append(result)
             
+            # Cache results
+            self._query_cache[cache_key] = (search_results, current_time)
+            
+            # Clean old cache entries (simple cleanup)
+            if len(self._query_cache) > 100:  # Limit cache size
+                oldest_key = min(self._query_cache.keys(), 
+                               key=lambda k: self._query_cache[k][1])
+                del self._query_cache[oldest_key]
+            
+            logger.log_db_operation("search", success=True, details={
+                'results_count': len(search_results),
+                'query_hash': cache_key[:8],
+                'cached': False
+            })
+            
             return search_results
             
         except Exception as e:
+            logger.log_db_operation("search", success=False, details={
+                'error': str(e),
+                'query_hash': self._get_cache_key(query, pastor_filter)[:8]
+            })
             st.error(f"Error searching sermons: {e}")
             return []
     
+    @handle_errors(context="ai_response_generation", user_message="AI response temporarily unavailable")
     def generate_conversational_answer(self, query: str, context_results: List[Dict], conversation_context: str = "", use_grok: bool = False) -> str:
         """Generate conversational answer using AI model with chat context"""
         if not context_results:
+            logger.log_user_activity("no_results_found", {"query_length": len(query)})
             return "I don't see anything in your sermon library that addresses that topic. Could you try asking about something else, or perhaps rephrase your question?"
         
         # Prepare context
@@ -287,6 +395,7 @@ Please respond in a natural, conversational way."""
         else:
             return self.generate_local_response(system_prompt, user_prompt)
     
+    @log_ai_operation_decorator("grok")
     def generate_grok_response(self, system_prompt: str, user_prompt: str) -> str:
         """Generate response using Grok (xAI) API"""
         try:
@@ -304,11 +413,20 @@ Please respond in a natural, conversational way."""
                 temperature=0.7,
             )
             
-            return response.choices[0].message.content
+            result = response.choices[0].message.content
+            
+            logger.log_ai_operation("grok_response", "grok", True, details={
+                'prompt_length': len(user_prompt),
+                'response_length': len(result)
+            })
+            
+            return result
             
         except Exception as e:
-            return f"Error generating Grok response: {e}"
+            logger.log_ai_operation("grok_response", "grok", False, details={'error': str(e)})
+            raise AIModelError(f"Error generating Grok response: {e}")
     
+    @log_ai_operation_decorator("ollama")
     def generate_local_response(self, system_prompt: str, user_prompt: str) -> str:
         """Generate response using local Ollama model or provide fallback"""
         try:
@@ -332,20 +450,34 @@ Please respond in a natural, conversational way."""
                     if response.status_code == 200:
                         result = response.json()
                         if 'response' in result and result['response'].strip():
+                            logger.log_ai_operation("ollama_response", model, True, details={
+                                'model_used': model,
+                                'response_length': len(result['response'])
+                            })
                             return result['response']
                     elif response.status_code == 404:
                         continue
                         
                 except requests.exceptions.RequestException as e:
+                    logger.log_ai_operation("ollama_response", model, False, details={
+                        'model_attempted': model,
+                        'error': str(e)
+                    })
                     continue
             
+            logger.log_ai_operation("ollama_response", "all_models", False, details={
+                'models_tried': models_to_try,
+                'fallback_used': True
+            })
             return self.generate_fallback_response(user_prompt)
                 
         except Exception as e:
+            logger.log_ai_operation("ollama_response", "unknown", False, details={'error': str(e)})
             return self.generate_fallback_response(user_prompt)
     
     def generate_fallback_response(self, user_prompt: str) -> str:
         """Provide a basic response when no AI model is available"""
+        logger.log_app_event("fallback_response_used", {"prompt_length": len(user_prompt)}, level="warning")
         return """I found relevant sermon content, but encountered an issue with the AI models.
 
 **Troubleshooting Ollama:**
@@ -358,6 +490,7 @@ Please respond in a natural, conversational way."""
 
 Please review the "Relevant Sermon Excerpts" below for the information related to your question."""
 
+    @log_db_operation_decorator("remove_sermon")
     def remove_sermon(self, filename: str) -> bool:
         """Remove specific sermon from the database"""
         try:
@@ -365,13 +498,27 @@ Please review the "Relevant Sermon Excerpts" below for the information related t
             
             if results['ids']:
                 self.collection.delete(ids=results['ids'])
+                logger.log_db_operation("remove_sermon", success=True, details={
+                    "filename": filename,
+                    "chunks_removed": len(results['ids'])
+                })
                 return True
+            
+            logger.log_db_operation("remove_sermon", success=False, details={
+                "filename": filename,
+                "reason": "not_found"
+            })
             return False
             
         except Exception as e:
+            logger.log_db_operation("remove_sermon", success=False, details={
+                "filename": filename,
+                "error": str(e)
+            })
             st.error(f"Error removing sermon: {e}")
             return False
 
+    @handle_errors(context="database_clear", user_message="Database clearing failed")
     def clear_database(self):
         """Clear all sermon data from the database"""
         try:
@@ -383,11 +530,18 @@ Please review the "Relevant Sermon Excerpts" below for the information related t
                 
                 # Check if we have write permissions
                 if not os.access(db_path, os.W_OK):
+                    logger.log_db_operation("clear_database", success=False, details={
+                        "reason": "readonly_directory"
+                    })
                     return False, "Database directory is read-only. Check file permissions."
                 
                 # Check individual files in the database directory
                 for file_path in db_path.rglob('*'):
                     if file_path.is_file() and not os.access(file_path, os.W_OK):
+                        logger.log_db_operation("clear_database", success=False, details={
+                            "reason": "readonly_file",
+                            "file": file_path.name
+                        })
                         return False, f"Database file is read-only: {file_path.name}. Check file permissions."
             
             # Try to delete and recreate the collection
@@ -398,10 +552,21 @@ Please review the "Relevant Sermon Excerpts" below for the information related t
                 metadata={"description": "Sermon transcripts and chunks"}
             )
             
+            # Clear cache
+            self._query_cache.clear()
+            
+            logger.log_db_operation("clear_database", success=True, details={
+                "operation": "collection_recreated"
+            })
+            
             return True, "Database cleared successfully"
             
         except Exception as e:
             error_msg = str(e)
+            logger.log_db_operation("clear_database", success=False, details={
+                "error": error_msg
+            })
+            
             if "readonly database" in error_msg.lower():
                 return False, "Database is read-only. Try restarting the application or check file permissions."
             elif "permission" in error_msg.lower():

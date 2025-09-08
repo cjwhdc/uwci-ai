@@ -69,3 +69,20 @@ tmp/
 # User uploaded content
 data/sermons/*.md
 uploads/
+# Enhanced Features - Logs and Data
+logs/
+*.log
+app/data/sessions.json
+app/data/rate_limits.json
+app/data/users_backup.json
+
+# Environment files
+.env
+
+# Cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Test artifacts
+.pytest_cache/

@@ -7,8 +7,12 @@ from pathlib import Path
 from typing import Dict, Optional
 import time
 
+# Import enhanced utilities
+from .utils.logger import logger
+from .utils.error_handler import handle_errors, AuthenticationError
+
 class UserManager:
-    """Production-ready user management system with enhanced user profiles"""
+    """Production-ready user management system with enhanced user profiles and logging"""
     
     def __init__(self, users_file: str = "app/data/users.json"):
         self.users_file = Path(users_file)
@@ -27,11 +31,12 @@ class UserManager:
                         self.users = json.loads(content)
                         # Create backup of working file
                         self._create_backup()
+                        logger.log_app_event("users_loaded", {"source": "main_file", "user_count": len(self.users)})
                         return
                     else:
-                        print("Warning: users.json is empty")
+                        logger.log_app_event("users_file_empty", level="warning")
             except (json.JSONDecodeError, FileNotFoundError) as e:
-                print(f"Error loading users.json: {e}")
+                logger.log_app_event("users_load_failed", {"source": "main_file", "error": str(e)}, level="error")
         
         # Try backup file if main file failed
         if self.backup_file.exists():
@@ -40,15 +45,15 @@ class UserManager:
                     content = f.read()
                     if content.strip():
                         self.users = json.loads(content)
-                        print("Recovered users from backup file")
+                        logger.log_app_event("users_recovered", {"source": "backup_file", "user_count": len(self.users)})
                         # Restore main file from backup
                         self._save_users()
                         return
             except (json.JSONDecodeError, FileNotFoundError) as e:
-                print(f"Error loading backup file: {e}")
+                logger.log_app_event("backup_load_failed", {"error": str(e)}, level="error")
         
         # If both files failed, create new user system
-        print("Creating new user system")
+        logger.log_app_event("creating_new_user_system", level="warning")
         self.users = {}
         self._create_default_admin()
     
@@ -59,7 +64,7 @@ class UserManager:
                 import shutil
                 shutil.copy2(self.users_file, self.backup_file)
         except Exception as e:
-            print(f"Failed to create backup: {e}")
+            logger.log_app_event("backup_creation_failed", {"error": str(e)}, level="error")
     
     def _create_default_admin(self):
         """Create default admin user if none exists"""
@@ -70,7 +75,7 @@ class UserManager:
             if initial_password:
                 # Use environment variable password (cloud deployment)
                 self.add_user("admin", initial_password, "administrator")
-                print("Admin account created using environment variable password.")
+                logger.log_auth_event("default_admin_created", "admin", True, {"source": "environment_variable"})
             else:
                 # Generate a random password for local development
                 temp_password = secrets.token_urlsafe(12)
@@ -84,9 +89,12 @@ class UserManager:
                         f.write("Please login and change this password immediately!\n")
                         f.write("Delete this file after setting up your admin account.\n")
                     
-                    print(f"Initial admin password saved to: {temp_file}")
+                    logger.log_auth_event("default_admin_created", "admin", True, {
+                        "source": "generated_password",
+                        "password_file": str(temp_file)
+                    })
                 except Exception as e:
-                    print(f"Could not save password file: {e}")
+                    logger.log_auth_event("password_file_creation_failed", "admin", False, {"error": str(e)})
                     # If file creation fails (like on Streamlit Cloud), show in UI
                     st.error("**FIRST TIME SETUP REQUIRED**")
                     st.error(f"**Admin Password:** {temp_password}")
@@ -94,6 +102,7 @@ class UserManager:
                     st.error("Please save this password and login immediately to change it!")
                     st.error("This password will not be shown again.")
     
+    @handle_errors(context="save_users", user_message="User data save failed")
     def _save_users(self):
         """Save users to secure file with atomic write and backup"""
         try:
@@ -108,14 +117,17 @@ class UserManager:
             # Create backup
             self._create_backup()
             
+            logger.log_app_event("users_saved", {"user_count": len(self.users)})
+            
         except Exception as e:
-            print(f"Error saving users: {e}")
+            logger.log_app_event("users_save_failed", {"error": str(e)}, level="error")
             # Try direct write as fallback
             try:
                 with open(self.users_file, 'w') as f:
                     json.dump(self.users, f, indent=2)
+                logger.log_app_event("users_saved_fallback", level="warning")
             except Exception as e2:
-                print(f"Fallback save also failed: {e2}")
+                logger.log_app_event("users_save_fallback_failed", {"error": str(e2)}, level="error")
     
     def hash_password(self, password: str, salt: str = None) -> tuple:
         """Hash password with salt"""
@@ -135,10 +147,12 @@ class UserManager:
         password_hash, _ = self.hash_password(password, salt)
         return password_hash == stored_hash
     
+    @handle_errors(context="add_user", user_message="User creation failed")
     def add_user(self, username: str, password: str, role: str = "user", first_name: str = "", last_name: str = "", email: str = "") -> bool:
         """Add new user with profile information"""
         username_lower = username.lower()
         if username_lower in self.users:
+            logger.log_auth_event("user_creation_failed", username, False, {"reason": "user_exists"})
             return False
         
         password_hash, salt = self.hash_password(password)
@@ -158,24 +172,39 @@ class UserManager:
         }
         
         self._save_users()
+        
+        logger.log_auth_event("user_created", username, True, {
+            "role": role,
+            "has_profile": bool(first_name or last_name or email)
+        })
+        
         return True
     
+    @handle_errors(context="update_profile", user_message="Profile update failed")
     def update_user_profile(self, username: str, first_name: str = None, last_name: str = None, email: str = None) -> tuple:
         """Update user profile information"""
         username_lower = username.lower()
         if username_lower not in self.users:
+            logger.log_auth_event("profile_update_failed", username, False, {"reason": "user_not_found"})
             return False, "User not found"
         
         user = self.users[username_lower]
         
-        if first_name is not None:
+        changes = {}
+        if first_name is not None and first_name != user.get("first_name", ""):
             user["first_name"] = first_name
-        if last_name is not None:
+            changes["first_name"] = True
+        if last_name is not None and last_name != user.get("last_name", ""):
             user["last_name"] = last_name
-        if email is not None:
+            changes["last_name"] = True
+        if email is not None and email != user.get("email", ""):
             user["email"] = email
+            changes["email"] = True
         
         self._save_users()
+        
+        logger.log_auth_event("profile_updated", username, True, {"changes": changes})
+        
         return True, "Profile updated successfully"
     
     def get_user_profile(self, username: str) -> Dict:
@@ -195,10 +224,19 @@ class UserManager:
             "last_login": user.get("last_login")
         }
     
+    @handle_errors(context="user_authentication", user_message="Authentication system error")
     def authenticate(self, username: str, password: str) -> tuple:
-        """Authenticate user with rate limiting - case insensitive username"""
+        """Authenticate user with rate limiting and enhanced logging - case insensitive username"""
         username_lower = username.lower()
+        
+        # Log authentication attempt
+        logger.log_auth_event("login_attempt", username, success=False, details={
+            'username_length': len(username),
+            'timestamp': time.time()
+        })
+        
         if username_lower not in self.users:
+            logger.log_auth_event("login_failed", username, False, {'reason': 'user_not_found'})
             return False, "Invalid username or password"
         
         user = self.users[username_lower]
@@ -206,6 +244,10 @@ class UserManager:
         # Check if account is locked
         if user.get("locked_until") and time.time() < user["locked_until"]:
             remaining = int(user["locked_until"] - time.time())
+            logger.log_auth_event("login_blocked", username, False, {
+                'reason': 'account_locked',
+                'remaining_seconds': remaining
+            })
             return False, f"Account locked. Try again in {remaining} seconds"
         
         # Check failed attempts
@@ -213,6 +255,10 @@ class UserManager:
             # Lock account for 15 minutes
             user["locked_until"] = time.time() + (15 * 60)
             self._save_users()
+            logger.log_auth_event("account_locked", username, False, {
+                'reason': 'too_many_attempts',
+                'failed_attempts': user.get("failed_attempts", 0)
+            })
             return False, "Too many failed attempts. Account locked for 15 minutes"
         
         # Verify password
@@ -222,27 +268,45 @@ class UserManager:
             user["last_login"] = time.time()
             user["locked_until"] = None
             self._save_users()
+            
+            # Log successful authentication
+            logger.log_auth_event("login_success", username, True, {
+                'last_login': user.get('last_login'),
+                'role': user.get('role', 'user')
+            })
+            
             return True, "Login successful"
         else:
             # Increment failed attempts
             user["failed_attempts"] = user.get("failed_attempts", 0) + 1
             self._save_users()
+            
+            # Log failed authentication
+            logger.log_auth_event("login_failed", username, False, {
+                'reason': 'invalid_password',
+                'failed_attempts': user["failed_attempts"]
+            })
+            
             return False, "Invalid username or password"
     
+    @handle_errors(context="change_password", user_message="Password change failed")
     def change_password(self, username: str, old_password: str, new_password: str) -> tuple:
         """Change user password - case insensitive username"""
         username_lower = username.lower()
         if username_lower not in self.users:
+            logger.log_auth_event("password_change_failed", username, False, {"reason": "user_not_found"})
             return False, "User not found"
         
         user = self.users[username_lower]
         
         # Verify old password
         if not self.verify_password(old_password, user["password_hash"], user["salt"]):
+            logger.log_auth_event("password_change_failed", username, False, {"reason": "invalid_old_password"})
             return False, "Current password is incorrect"
         
         # Validate new password
         if len(new_password) < 8:
+            logger.log_auth_event("password_change_failed", username, False, {"reason": "password_too_short"})
             return False, "Password must be at least 8 characters long"
         
         # Hash new password
@@ -251,6 +315,9 @@ class UserManager:
         user["salt"] = salt
         
         self._save_users()
+        
+        logger.log_auth_event("password_changed", username, True)
+        
         return True, "Password changed successfully"
     
     def get_user_role(self, username: str) -> Optional[str]:
@@ -284,11 +351,13 @@ def check_password(username: str, password: str) -> tuple:
     """Check if username and password are correct"""
     return user_manager.authenticate(username, password)
 
+@handle_errors(context="logout", user_message="Logout failed")
 def logout():
     """Clear session and logout"""
     # Log the logout
     if st.session_state.get('username'):
-        st.info(f"User {st.session_state.username} logged out")
+        logger.log_auth_event("logout", st.session_state.username, True)
+        logger.log_user_activity("logout")
     
     # Clear all session state
     for key in list(st.session_state.keys()):
@@ -313,10 +382,16 @@ def require_auth(required_role: str = None):
         def wrapper(*args, **kwargs):
             if not st.session_state.get('authenticated', False):
                 st.error("Authentication required")
+                logger.log_auth_event("unauthorized_access_attempt", 
+                                    st.session_state.get('username', 'unknown'), 
+                                    False, {'function': func.__name__})
                 return
             
             if required_role and st.session_state.get('user_role') != required_role:
                 st.error("Insufficient permissions")
+                logger.log_auth_event("insufficient_permissions", 
+                                    st.session_state.get('username', 'unknown'), 
+                                    False, {'required_role': required_role, 'function': func.__name__})
                 return
             
             return func(*args, **kwargs)
@@ -353,6 +428,7 @@ def user_profile_form():
             
             if success:
                 st.success(message)
+                logger.log_user_activity("profile_updated")
             else:
                 st.error(message)
 
@@ -382,6 +458,7 @@ def change_password_form():
             
             if success:
                 st.success(message)
+                logger.log_user_activity("password_changed")
             else:
                 st.error(message)
 
@@ -389,6 +466,9 @@ def admin_user_management():
     """Admin interface for user management"""
     if not is_admin():
         st.error("Admin access required")
+        logger.log_auth_event("admin_access_denied", 
+                            st.session_state.get('username', 'unknown'), 
+                            False)
         return
     
     st.subheader("User Management (Admin Only)")
@@ -414,7 +494,6 @@ def admin_user_management():
             with col2:
                 new_password = st.text_input("Password", type="password")
                 new_last_name = st.text_input("Last Name")
-                new_role = st.selectbox("Role", ["user", "administrator"])
             
             if st.form_submit_button("Add User"):
                 if len(new_password) < 8:
@@ -426,6 +505,10 @@ def admin_user_management():
                     )
                     if success:
                         st.success(f"User {new_username} added successfully")
+                        logger.log_auth_event("user_created_by_admin", new_username, True, {
+                            "created_by": st.session_state.username,
+                            "role": new_role
+                        })
                     else:
                         st.error(f"User {new_username} already exists")
     
