@@ -4,50 +4,34 @@ from datetime import datetime
 
 def show_chat_tab():
     """Display the chat interface tab"""
+    
+    # Set flag to show conversation settings in sidebar
+    st.session_state.show_chat_filters = True
+    
     # Initialize chat history
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
+        
+        # Get user's first name for personalized greeting
+        try:
+            from app.auth import user_manager
+            profile = user_manager.get_user_profile(st.session_state.username)
+            first_name = profile.get('first_name', '').strip()
+            
+            if first_name:
+                greeting_name = first_name
+            else:
+                greeting_name = st.session_state.username
+        except:
+            # Fallback if profile lookup fails
+            greeting_name = st.session_state.username
+        
         # Add welcome message
         st.session_state.chat_history.append({
             "role": "assistant",
-            "content": f"Hello {st.session_state.username}! I'm here to help you explore your sermon library. I can answer questions about what different pastors have taught, find related Bible passages, and help you discover insights across your collection. What would you like to discuss?",
+            "content": f"Hello {greeting_name}! I'm here to help you explore your sermon library. I can answer questions about what different pastors have taught, find related Bible passages, and help you discover insights across your collection. What would you like to discuss?",
             "timestamp": datetime.now()
         })
-    
-    # Pastor filter in sidebar for this tab
-    with st.sidebar:
-        st.subheader("Conversation Settings")
-        
-        # Get pastors for filter
-        if hasattr(st.session_state.ai_engine, 'collection') and st.session_state.ai_engine.collection:
-            try:
-                all_results = st.session_state.ai_engine.collection.get()
-                raw_pastors = [meta.get('pastor', 'Unknown') for meta in all_results['metadatas']]
-                
-                # Clean up pastor names
-                cleaned_pastors = set()
-                for pastor in raw_pastors:
-                    clean_pastor = re.sub(r'^#+\s*', '', pastor)
-                    clean_pastor = re.sub(r'[*_`~]', '', clean_pastor)
-                    clean_pastor = clean_pastor.strip('# *_-=+')
-                    cleaned_pastors.add(clean_pastor)
-                
-                pastors = ["All Pastors"] + sorted(list(cleaned_pastors))
-            except:
-                pastors = ["All Pastors"]
-        else:
-            pastors = ["All Pastors"]
-        
-        pastor_filter = st.selectbox("Focus on specific pastor", pastors)
-        
-        if st.button("Clear Conversation"):
-            st.session_state.chat_history = []
-            st.session_state.chat_history.append({
-                "role": "assistant", 
-                "content": "Conversation cleared. What would you like to discuss about your sermons?",
-                "timestamp": datetime.now()
-            })
-            st.rerun()
     
     # Chat container
     chat_container = st.container()
@@ -70,8 +54,8 @@ def show_chat_tab():
                                 st.write(excerpt['content'])
                                 st.divider()
     
-    # Chat input
-    user_input = st.chat_input("Ask about your sermons...")
+    # Chat input - add unique key based on tab context to prevent duplicates
+    user_input = st.chat_input("Ask about your sermons...", key="ask_questions_chat_input")
     
     if user_input:
         # Add user message to history
@@ -90,9 +74,15 @@ def show_chat_tab():
                 for msg in context_messages[:-1]  # Exclude current message
             ])
             
+            # Get pastor filter from sidebar if it exists
+            pastor_filter = None
+            if 'global_pastor_filter' in st.session_state:
+                filter_value = st.session_state.global_pastor_filter
+                if filter_value != "All Pastors":
+                    pastor_filter = filter_value
+            
             # Search for relevant content
-            filter_pastor = pastor_filter if pastor_filter != "All Pastors" else None
-            results = st.session_state.ai_engine.search_sermons(user_input, filter_pastor)
+            results = st.session_state.ai_engine.search_sermons(user_input, pastor_filter)
             
             if results:
                 # Generate conversational response

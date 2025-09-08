@@ -4,6 +4,11 @@ from app.auth import change_password_form, is_admin
 
 def show_settings_tab():
     """Display the user settings tab"""
+    
+    # Clear chat filters flag when not in chat tab
+    if 'show_chat_filters' in st.session_state:
+        st.session_state.show_chat_filters = False
+    
     st.header("Settings")
     
     # User account settings
@@ -12,82 +17,82 @@ def show_settings_tab():
     # Password change form for all users
     change_password_form()
     
-    st.divider()
-    
-    st.subheader("System Information")
-    
-    # User info
-    st.info(f"Logged in as: {st.session_state.username} ({st.session_state.get('user_role', 'user')})")
-    
-    # Basic database info (read-only for regular users)
-    sermons_dir = Path("data/sermons")
-    processed_files = []  # Initialize with empty list
-    
-    if sermons_dir.exists():
-        sermon_files = list(sermons_dir.glob("*.md"))
-        processed_files = st.session_state.ai_engine.get_processed_files()
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Sermons", len(sermon_files))
-        with col2:
-            st.metric("Available for Search", len(processed_files))
-        with col3:
-            unprocessed = len(sermon_files) - len(processed_files)
-            st.metric("Pending Processing", unprocessed)
-        
-        if unprocessed > 0:
-            st.info(f"Contact an administrator to process {unprocessed} pending sermon(s).")
-    
-    # Current user settings (if any personal preferences are added later)
     st.subheader("User Preferences")
     st.write("Personal settings and preferences will be available here in future updates.")
     
-    # System status (basic info)
+    # System status with connection tests
     st.subheader("System Status")
-    st.write("**Database:** Connected")
-    st.write("**Search:** Available")
     
-    if st.session_state.get('use_grok', True):
-        st.write("**AI Model:** Grok AI")
-    else:
-        st.write("**AI Model:** Local (Ollama)")
+    # Test Grok connection
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        if st.session_state.get('grok_api_key'):
+            st.write("**Grok AI:** Configured")
+        else:
+            st.write("**Grok AI:** Not configured")
+    with col2:
+        if st.button("Test", key="test_grok", help="Test Grok API connection"):
+            with st.spinner("Testing Grok..."):
+                try:
+                    test_result = st.session_state.ai_engine.generate_grok_response(
+                        "You are a test assistant.", 
+                        "Respond with 'Connection successful' if you receive this message."
+                    )
+                    if "successful" in test_result.lower():
+                        st.success("Grok connection successful")
+                    else:
+                        st.warning("Grok responded but may have issues")
+                except Exception as e:
+                    st.error(f"Grok connection failed: {str(e)[:50]}...")
+    
+    # Test Ollama connection
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.write("**Ollama (Local AI):** Available")
+    with col2:
+        if st.button("Test", key="test_ollama", help="Test Ollama connection"):
+            with st.spinner("Testing Ollama..."):
+                try:
+                    import requests
+                    response = requests.get("http://localhost:11434/api/tags", timeout=5)
+                    if response.status_code == 200:
+                        models = response.json().get('models', [])
+                        st.success(f"Ollama connected ({len(models)} models)")
+                    else:
+                        st.error("Ollama service not responding")
+                except Exception as e:
+                    st.error(f"Ollama connection failed: {str(e)[:50]}...")
+    
+    # Test Dropbox connection
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        try:
+            from app.config.config import USE_DROPBOX_SYNC, DROPBOX_ACCESS_TOKEN
+            if USE_DROPBOX_SYNC and DROPBOX_ACCESS_TOKEN:
+                st.write("**Dropbox Sync:** Enabled")
+            else:
+                st.write("**Dropbox Sync:** Disabled")
+        except ImportError:
+            st.write("**Dropbox Sync:** Not configured")
+    
+    with col2:
+        if st.button("Test", key="test_dropbox", help="Test Dropbox connection"):
+            with st.spinner("Testing Dropbox..."):
+                try:
+                    from app.config.config import USE_DROPBOX_SYNC, DROPBOX_ACCESS_TOKEN
+                    if USE_DROPBOX_SYNC and DROPBOX_ACCESS_TOKEN:
+                        import dropbox
+                        dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
+                        account = dbx.users_get_current_account()
+                        st.success(f"Dropbox connected: {account.name.display_name}")
+                    else:
+                        st.info("Dropbox sync not enabled")
+                except ImportError:
+                    st.error("Dropbox not configured")
+                except Exception as e:
+                    st.error(f"Dropbox connection failed: {str(e)[:50]}...")
+    
+    # Database status (always show)
+    st.write("**Database:** Connected")
     
     st.divider()
-    
-    st.subheader("Application Information")
-    st.write("**UWCI Sermon AI** - Intelligent sermon analysis and search system")
-    st.write("For technical support or feature requests, contact your administrator.")
-    
-    # Help section
-    st.subheader("How to Use")
-    st.markdown("""
-    **Asking Questions:**
-    - Use the "Ask Questions" tab to search your sermon library
-    - Ask about specific topics, Bible passages, or pastor teachings
-    - Use the pastor filter to focus on specific speakers
-    
-    **Tips for Better Results:**
-    - Be specific in your questions
-    - Try different phrasings if you don't find what you're looking for
-    - Use theological terms and Bible references when relevant
-    """)
-    
-    # Quick stats for user interest
-    if len(processed_files) > 0:
-        # Get some basic stats
-        try:
-            all_results = st.session_state.ai_engine.collection.get()
-            if all_results['metadatas']:
-                pastors = set(meta.get('pastor', 'Unknown') for meta in all_results['metadatas'])
-                pastors.discard('Unknown')
-                
-                st.subheader("Library Overview")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write(f"**Pastors Featured:** {len(pastors)}")
-                with col2:
-                    total_chunks = len(all_results['metadatas'])
-                    st.write(f"**Searchable Sections:** {total_chunks:,}")
-        except:
-            pass  # Don't show stats if there's an error

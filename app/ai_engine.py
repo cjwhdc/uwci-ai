@@ -261,17 +261,17 @@ class AIEngine:
             for result in context_results
         ])
         
-        system_prompt = """You are a knowledgeable assistant helping someone analyze their sermon library. Provide clear, informative responses that focus on the content and teachings found in the sermons.
+        system_prompt = """You are a knowledgeable assistant helping someone analyze their sermon library. Provide clear, direct responses focused on the sermon content.
 
 Key guidelines:
-- Be direct and informational rather than overly conversational
-- Reference pastors by name and sermon title when discussing their specific teachings (e.g., "Pastor John taught in 'Walking in Faith' that...")
+- Start immediately with your answer - no introductory paragraphs or acknowledgments
+- Reference pastors by name and sermon title when discussing their teachings (e.g., "Pastor John taught in 'Walking in Faith' that...")
 - Present information objectively and clearly
 - Make connections between different sermons when relevant
 - Focus on theological content and biblical insights
-- Provide substantive analysis rather than casual commentary
+- Provide substantive analysis rather than commentary about the request
 - When appropriate, note related topics that might be worth exploring
-- Keep responses substantive and focused on the sermon content"""
+- Never acknowledge the format or structure of the request - just answer directly"""
         
         context_addition = f"\n\nPrevious conversation context:\n{conversation_context}" if conversation_context else ""
         
@@ -375,6 +375,22 @@ Please review the "Relevant Sermon Excerpts" below for the information related t
     def clear_database(self):
         """Clear all sermon data from the database"""
         try:
+            # Check if database directory exists and is writable
+            db_path = Path("./sermon_db")
+            if db_path.exists():
+                import os
+                import stat
+                
+                # Check if we have write permissions
+                if not os.access(db_path, os.W_OK):
+                    return False, "Database directory is read-only. Check file permissions."
+                
+                # Check individual files in the database directory
+                for file_path in db_path.rglob('*'):
+                    if file_path.is_file() and not os.access(file_path, os.W_OK):
+                        return False, f"Database file is read-only: {file_path.name}. Check file permissions."
+            
+            # Try to delete and recreate the collection
             self.client.delete_collection("sermons")
             
             self.collection = self.client.get_or_create_collection(
@@ -382,7 +398,13 @@ Please review the "Relevant Sermon Excerpts" below for the information related t
                 metadata={"description": "Sermon transcripts and chunks"}
             )
             
-            return True
+            return True, "Database cleared successfully"
+            
         except Exception as e:
-            st.error(f"Error clearing database: {e}")
-            return False
+            error_msg = str(e)
+            if "readonly database" in error_msg.lower():
+                return False, "Database is read-only. Try restarting the application or check file permissions."
+            elif "permission" in error_msg.lower():
+                return False, "Permission denied. Check file permissions on the sermon_db directory."
+            else:
+                return False, f"Error clearing database: {error_msg}"

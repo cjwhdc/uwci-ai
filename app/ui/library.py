@@ -7,42 +7,13 @@ from collections import defaultdict
 
 def show_library_tab():
     """Display the library management tab"""
-    st.header("Sermon Library Management")
     
-    # Check if user is admin for processing functions
-    if is_admin():
-        # Action buttons at the top - Admin only
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Process New Sermons", type="primary", help="Scan for and process any new sermon files"):
-                with st.spinner("Scanning and processing sermon files..."):
-                    st.session_state.ai_engine.process_new_sermons()
-                    st.rerun()
-        
-        with col2:
-            if st.button("Clear Database", type="secondary", help="Remove all processed sermons from database"):
-                # Add confirmation
-                if st.session_state.get('confirm_clear', False):
-                    with st.spinner("Clearing database..."):
-                        success = st.session_state.ai_engine.clear_database()
-                        if success:
-                            st.success("Database cleared successfully!")
-                            st.session_state.confirm_clear = False
-                        else:
-                            st.error("Failed to clear database")
-                    st.rerun()
-                else:
-                    st.session_state.confirm_clear = True
-                    st.warning("Click again to confirm database clearing")
-        
-        st.divider()
-    else:
-        # Non-admin users see a message
-        st.info("Library Status - Contact administrator to process new sermons")
-        st.divider()
+    # Clear chat filters flag when not in chat tab
+    if 'show_chat_filters' in st.session_state:
+        st.session_state.show_chat_filters = False
     
-    # Database content section - visible to all users
-    st.subheader("Processed Sermons Database")
+    # Sermons Database section - visible to all users
+    st.subheader("Sermons Database")
     
     try:
         # Get all data from the database
@@ -95,16 +66,6 @@ def show_library_tab():
                 # Fallback to title sorting if date sorting fails
                 sermon_data.sort(key=lambda x: x['Title'])
             
-            # Display metrics
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Sermons in Database", len(sermon_data))
-            with col2:
-                st.metric("Total Chunks", total_chunks)
-            with col3:
-                unique_pastors = len(set(sermon['Pastor'] for sermon in sermon_data if sermon['Pastor'] != 'Unknown'))
-                st.metric("Pastors Featured", unique_pastors)
-            
             # Display the sermons table
             if sermon_data:
                 df_sermons = pd.DataFrame(sermon_data)
@@ -113,48 +74,117 @@ def show_library_tab():
                 df_sermons = df_sermons[display_columns]
                 st.dataframe(df_sermons, width='stretch')
             
-            # Show file system comparison for admins
+            # Admin action buttons - moved below the database display
             if is_admin():
-                st.divider()
-                st.subheader("File System vs Database Comparison")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Process New Sermons", type="primary", help="Scan for and process any new sermon files"):
+                        with st.spinner("Scanning and processing sermon files..."):
+                            st.session_state.ai_engine.process_new_sermons()
                 
-                sermons_dir = Path("data/sermons")
-                if sermons_dir.exists():
-                    filesystem_files = set(f.name for f in sermons_dir.glob("*.md"))
-                    database_files = set(sermons_by_file.keys())
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.write("**Files in filesystem but not in database:**")
-                        missing_from_db = filesystem_files - database_files
-                        if missing_from_db:
-                            for file in sorted(missing_from_db):
-                                st.write(f"- {file}")
+                with col2:
+                    if st.button("Clear Database", type="secondary", help="Remove all processed sermons from database"):
+                        # Add confirmation
+                        if st.session_state.get('confirm_clear', False):
+                            with st.spinner("Clearing database..."):
+                                result = st.session_state.ai_engine.clear_database()
+                                if isinstance(result, tuple):
+                                    success, message = result
+                                    if success:
+                                        st.success(message)
+                                    else:
+                                        st.error(message)
+                                    st.session_state.confirm_clear = False
+                                else:
+                                    # Handle old return format for compatibility
+                                    if result:
+                                        st.success("Database cleared successfully!")
+                                    else:
+                                        st.error("Failed to clear database")
+                                    st.session_state.confirm_clear = False
                         else:
-                            st.write("None")
-                    
-                    with col2:
-                        st.write("**Files in database but not in filesystem:**")
-                        missing_from_fs = database_files - filesystem_files
-                        if missing_from_fs:
-                            for file in sorted(missing_from_fs):
-                                st.write(f"- {file}")
-                        else:
-                            st.write("None")
-                else:
-                    st.info("No data/sermons directory found on this system.")
+                            st.session_state.confirm_clear = True
+                            st.warning("Click again to confirm database clearing")
         else:
             st.info("No sermons found in the database.")
             
-            # For admins, show instruction to process sermons
+            # For admins, show instruction to process sermons and buttons
             if is_admin():
                 st.write("To add sermons to the database:")
                 st.write("1. Place sermon files (.md format) in the data/sermons folder")
-                st.write("2. Click 'Process New Sermons' button above")
+                st.write("2. Click 'Process New Sermons' button below")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Process New Sermons", type="primary", help="Scan for and process any new sermon files"):
+                        with st.spinner("Scanning and processing sermon files..."):
+                            st.session_state.ai_engine.process_new_sermons()
+                
+                with col2:
+                    if st.button("Clear Database", type="secondary", help="Remove all processed sermons from database"):
+                        # Add confirmation
+                        if st.session_state.get('confirm_clear', False):
+                            with st.spinner("Clearing database..."):
+                                result = st.session_state.ai_engine.clear_database()
+                                if isinstance(result, tuple):
+                                    success, message = result
+                                    if success:
+                                        st.success(message)
+                                    else:
+                                        st.error(message)
+                                    st.session_state.confirm_clear = False
+                                else:
+                                    # Handle old return format for compatibility
+                                    if result:
+                                        st.success("Database cleared successfully!")
+                                    else:
+                                        st.error("Failed to clear database")
+                                    st.session_state.confirm_clear = False
+                        else:
+                            st.session_state.confirm_clear = True
+                            st.warning("Click again to confirm database clearing")
     
     except Exception as e:
-        st.error(f"Error accessing database: {e}")
-        st.info("Make sure the AI engine is properly initialized.")
+        error_msg = str(e)
+        if "Missing metadata segment" in error_msg or "Missing field" in error_msg:
+            st.error("Database corruption detected: Missing metadata segments")
+            st.warning("The database appears to be corrupted. This can happen after importing from a backup or if the database was interrupted during writing.")
+            
+            if is_admin():
+                st.write("**Recovery Options:**")
+                st.write("1. **Clear and rebuild database** - This will remove all current data and reprocess sermons from files")
+                st.write("2. **Restart the application** - Sometimes helps with temporary corruption")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Clear and Rebuild Database", help="Clear corrupted database and reprocess all sermon files"):
+                        if st.session_state.get('confirm_rebuild', False):
+                            with st.spinner("Rebuilding database..."):
+                                # Clear the corrupted database
+                                result = st.session_state.ai_engine.clear_database()
+                                if isinstance(result, tuple):
+                                    success, message = result
+                                else:
+                                    success = result
+                                
+                                if success:
+                                    # Process sermons again
+                                    st.session_state.ai_engine.process_new_sermons()
+                                    st.success("Database rebuilt successfully!")
+                                else:
+                                    st.error("Failed to clear corrupted database. Try restarting the application.")
+                                st.session_state.confirm_rebuild = False
+                        else:
+                            st.session_state.confirm_rebuild = True
+                            st.warning("This will delete all current data and reprocess from files. Click again to confirm.")
+                
+                with col2:
+                    st.info("If the problem persists, check that all sermon files are properly formatted and not corrupted.")
+            else:
+                st.info("Contact your administrator to fix the database corruption.")
+        else:
+            st.error(f"Error accessing database: {error_msg}")
+            st.info("Make sure the AI engine is properly initialized.")
     
     st.divider()
     

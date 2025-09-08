@@ -5,6 +5,10 @@ from app.config.config import DEFAULT_CHUNK_SIZE, DEFAULT_CHUNK_OVERLAP, MAX_SEA
 
 def show_admin_settings_tab():
     """Display the admin-only settings tab"""
+    # Clear chat filters flag when not in chat tab
+    if 'show_chat_filters' in st.session_state:
+        st.session_state.show_chat_filters = False
+    
     # Double-check admin status
     if not is_admin():
         st.error("🚫 Access Denied: Administrator privileges required")
@@ -32,9 +36,6 @@ def show_admin_settings_tab():
         st.rerun()
     
     if use_grok:
-        st.success("✅ Using Grok AI (xAI) for best results")
-        st.info("API Key: Configured via config.py file")
-        
         # Test API connection
         if st.button("Test Grok API Connection"):
             with st.spinner("Testing connection..."):
@@ -45,13 +46,13 @@ def show_admin_settings_tab():
                         "Respond with 'API connection successful' if you receive this message."
                     )
                     if "successful" in test_results.lower():
-                        st.success("✅ Grok API connection successful")
+                        st.success("Grok API connection successful")
                     else:
-                        st.warning("⚠️ API responded but may have issues")
+                        st.warning("API responded but may have issues")
                         with st.expander("Response details"):
                             st.write(test_results)
                 except Exception as e:
-                    st.error(f"❌ API connection failed: {e}")
+                    st.error(f"API connection failed: {e}")
     else:
         st.info("Using local AI model (Ollama)")
         st.write("**Ollama Setup Instructions:**")
@@ -313,16 +314,3 @@ sermon-ai/
 ├── logs/                 # Application logs
 └── backup/              # Backup storage
     """)
-    
-    # Environment info
-    import os
-    st.subheader("🌍 Environment")
-    env_info = {
-        "Python Version": f"{st.version_info if hasattr(st, 'version_info') else 'Unknown'}",
-        "Streamlit Version": st.__version__,
-        "Database Path": os.path.abspath("./sermon_db"),
-        "User Data Path": os.path.abspath("app/data/"),
-    }
-    
-    for key, value in env_info.items():
-        st.write(f"**{key}:** {value}")

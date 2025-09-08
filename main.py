@@ -10,6 +10,9 @@ import hashlib
 import time
 import json
 
+# Suppress HuggingFace tokenizers warning
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 # Add the project root to Python path
 project_root = Path(__file__).parent
 if str(project_root) not in sys.path:
@@ -222,8 +225,8 @@ def main_app():
                 if icon.mode != 'RGB':
                     icon = icon.convert('RGB')
                 # Make it a good size for the title area
-                icon = icon.resize((64, 64), Image.Resampling.LANCZOS)
-                st.image(icon, width=64)
+                icon = icon.resize((48, 48), Image.Resampling.LANCZOS)
+                st.image(icon, width=48)
             else:
                 st.markdown("📖")
         except Exception:
@@ -231,13 +234,6 @@ def main_app():
     
     with col2:
         st.title("UWCI Sermon AI")
-    
-    # User info and logout in sidebar
-    with st.sidebar:
-        st.write(f"👤 Logged in as: **{st.session_state.username}**")
-        if st.button("Logout", type="secondary"):
-            logout_persistent()
-        st.divider()
     
     # Initialize components
     if 'ai_engine' not in st.session_state:
@@ -248,33 +244,32 @@ def main_app():
             st.session_state.grok_api_key = GROK_API_KEY
             st.session_state.use_grok = True
     
-    # Sidebar - simplified
-    st.sidebar.header("System Status")
-    
-    # Show current AI model status
-    if st.session_state.get('use_grok', False):
-        st.sidebar.success("Using Grok AI")
-    else:
-        st.sidebar.info("Using local AI (Ollama)")
+    # Show modern sidebar
+    from app.ui.sidebar import show_sidebar
+    show_sidebar()
     
     # Main interface tabs - conditional based on user role
     if st.session_state.get('user_role') == 'administrator':
-        tab1, tab2, tab3, tab4 = st.tabs(["Ask Questions", "Sermon Library", "Settings", "Admin Settings"])
+        tabs = st.tabs(["Ask Questions", "Sermon Library", "Settings", "Admin Settings"])
     else:
-        tab1, tab2, tab3 = st.tabs(["Ask Questions", "Sermon Library", "Settings"])
+        tabs = st.tabs(["Ask Questions", "Sermon Library", "Settings"])
     
-    with tab1:
+    # Only render content in the active tab to prevent duplicate elements
+    with tabs[0]:
+        # Ask Questions tab
         show_chat_tab()
     
-    with tab2:
+    with tabs[1]:
+        # Sermon Library tab
         show_library_tab()
     
-    with tab3:
+    with tabs[2]:
+        # Settings tab
         show_settings_tab()
     
-    # Admin-only tab
-    if st.session_state.get('user_role') == 'administrator':
-        with tab4:
+    # Admin tab (only if user is administrator)
+    if st.session_state.get('user_role') == 'administrator' and len(tabs) > 3:
+        with tabs[3]:
             from app.ui.admin_settings import show_admin_settings_tab
             show_admin_settings_tab()
 
@@ -294,7 +289,7 @@ def main():
                 img = img.convert('RGB')
             
             if img.size[0] > 64 or img.size[1] > 64:
-                img = img.resize((32, 32), Image.Resampling.LANCZOS)
+                img = img.resize((64, 64), Image.Resampling.LANCZOS)
             
             page_icon = img
             

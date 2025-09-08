@@ -8,7 +8,7 @@ from typing import Dict, Optional
 import time
 
 class UserManager:
-    """Production-ready user management system with better persistence"""
+    """Production-ready user management system with enhanced user profiles"""
     
     def __init__(self, users_file: str = "app/data/users.json"):
         self.users_file = Path(users_file)
@@ -135,8 +135,8 @@ class UserManager:
         password_hash, _ = self.hash_password(password, salt)
         return password_hash == stored_hash
     
-    def add_user(self, username: str, password: str, role: str = "user") -> bool:
-        """Add new user - usernames are stored in lowercase for case-insensitive lookup"""
+    def add_user(self, username: str, password: str, role: str = "user", first_name: str = "", last_name: str = "", email: str = "") -> bool:
+        """Add new user with profile information"""
         username_lower = username.lower()
         if username_lower in self.users:
             return False
@@ -151,11 +151,49 @@ class UserManager:
             "last_login": None,
             "failed_attempts": 0,
             "locked_until": None,
-            "display_name": username  # Store original case for display
+            "display_name": username,  # Store original case for display
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": email
         }
         
         self._save_users()
         return True
+    
+    def update_user_profile(self, username: str, first_name: str = None, last_name: str = None, email: str = None) -> tuple:
+        """Update user profile information"""
+        username_lower = username.lower()
+        if username_lower not in self.users:
+            return False, "User not found"
+        
+        user = self.users[username_lower]
+        
+        if first_name is not None:
+            user["first_name"] = first_name
+        if last_name is not None:
+            user["last_name"] = last_name
+        if email is not None:
+            user["email"] = email
+        
+        self._save_users()
+        return True, "Profile updated successfully"
+    
+    def get_user_profile(self, username: str) -> Dict:
+        """Get user profile information"""
+        username_lower = username.lower()
+        if username_lower not in self.users:
+            return {}
+        
+        user = self.users[username_lower]
+        return {
+            "username": user.get("display_name", username),
+            "first_name": user.get("first_name", ""),
+            "last_name": user.get("last_name", ""),
+            "email": user.get("email", ""),
+            "role": user.get("role", "user"),
+            "created_at": user.get("created_at"),
+            "last_login": user.get("last_login")
+        }
     
     def authenticate(self, username: str, password: str) -> tuple:
         """Authenticate user with rate limiting - case insensitive username"""
@@ -289,6 +327,35 @@ def is_admin() -> bool:
     """Check if current user is admin"""
     return st.session_state.get('user_role') == 'administrator'
 
+def user_profile_form():
+    """Display user profile editing form"""
+    st.subheader("User Profile")
+    
+    # Get current profile
+    profile = user_manager.get_user_profile(st.session_state.username)
+    
+    with st.form("user_profile"):
+        first_name = st.text_input("First Name", value=profile.get("first_name", ""))
+        last_name = st.text_input("Last Name", value=profile.get("last_name", ""))
+        email = st.text_input("Email", value=profile.get("email", ""))
+        
+        # Show read-only fields
+        st.text_input("Username", value=profile.get("username", ""), disabled=True)
+        st.text_input("Role", value=profile.get("role", ""), disabled=True)
+        
+        if st.form_submit_button("Update Profile"):
+            success, message = user_manager.update_user_profile(
+                st.session_state.username,
+                first_name=first_name,
+                last_name=last_name,
+                email=email
+            )
+            
+            if success:
+                st.success(message)
+            else:
+                st.error(message)
+
 def change_password_form():
     """Display password change form"""
     st.subheader("Change Password")
@@ -339,15 +406,24 @@ def admin_user_management():
     # Add new user
     with st.expander("Add New User"):
         with st.form("add_user"):
-            new_username = st.text_input("Username")
-            new_password = st.text_input("Password", type="password")
-            new_role = st.selectbox("Role", ["user", "administrator"])
+            col1, col2 = st.columns(2)
+            with col1:
+                new_username = st.text_input("Username")
+                new_first_name = st.text_input("First Name")
+                new_email = st.text_input("Email")
+            with col2:
+                new_password = st.text_input("Password", type="password")
+                new_last_name = st.text_input("Last Name")
+                new_role = st.selectbox("Role", ["user", "administrator"])
             
             if st.form_submit_button("Add User"):
                 if len(new_password) < 8:
                     st.error("Password must be at least 8 characters long")
                 else:
-                    success = user_manager.add_user(new_username, new_password, new_role)
+                    success = user_manager.add_user(
+                        new_username, new_password, new_role,
+                        new_first_name, new_last_name, new_email
+                    )
                     if success:
                         st.success(f"User {new_username} added successfully")
                     else:
@@ -358,8 +434,14 @@ def admin_user_management():
     users_data = []
     for username, user_data in user_manager.users.items():
         display_name = user_data.get("display_name", username)
+        first_name = user_data.get("first_name", "")
+        last_name = user_data.get("last_name", "")
+        full_name = f"{first_name} {last_name}".strip() or "Not provided"
+        
         users_data.append({
             "Username": display_name,
+            "Full Name": full_name,
+            "Email": user_data.get("email", "Not provided"),
             "Role": user_data.get("role", "user"),
             "Last Login": time.ctime(user_data["last_login"]) if user_data.get("last_login") else "Never",
             "Failed Attempts": user_data.get("failed_attempts", 0)
